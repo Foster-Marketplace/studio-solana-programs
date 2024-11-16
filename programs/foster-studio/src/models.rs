@@ -151,3 +151,13 @@ impl MerchProductWithCurrentSupply {
     }
 }
 
+// Just playing around with a rev allocation struct
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RevenueAllocation {
+    party_wallet_id: String,
+    party_name: Option<String>,
+    role: String,                  // e.g., "vendor", "affiliate", "platform"
+    percentage_share: Option<f64>, // this could be required, and we default to 0, which may make calculation logic easier
+    fixed_amount: Option<f64>, // this could be required, and we default to 0, which may make calculation logic easier
+    payout_method: String,     // e.g., "bank_transfer", "paypal", "crypto"
+}
