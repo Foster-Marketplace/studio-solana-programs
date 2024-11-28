@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 pub mod constants;
 pub mod errors;
 pub mod instructions;
+pub mod mpl_token_metadata;
 pub mod state;
 
 use crate::instructions::*;
