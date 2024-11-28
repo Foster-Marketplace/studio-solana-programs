@@ -14,6 +14,7 @@ use crate::{
 
 #[derive(Accounts)]
 pub struct BuyProduct<'info> {
+    #[account(mut)]
     pub buyer: Signer<'info>,
 
     #[account(mut)]
