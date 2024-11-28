@@ -1,1 +1,1 @@
-pub const CLAIM_MARKER: &str = "config";
+pub const CLAIM_MARKER: &str = "claim";
