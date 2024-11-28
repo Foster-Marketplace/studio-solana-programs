@@ -29,14 +29,18 @@ pub enum FosterStudioError {
     MissingMasterEdition,
 
     // 6006
+    #[msg("Missing edition")]
+    MissingEdition,
+
+    // 6007
     #[msg("Missing claim marker")]
     MissingClaimMarker,
 
-    // 6007
+    // 6008
     #[msg("No more claims left on edition")]
     NoMoreClaims,
 
-    // 6008
+    // 6009
     #[msg("Account mismatch")]
     AccountMismatch,
 }

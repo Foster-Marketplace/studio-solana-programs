@@ -1,6 +1,6 @@
 use anchor_lang::{prelude::*, solana_program::account_info::next_account_info, system_program};
 use anchor_spl::{
-    metadata::{mpl_token_metadata::accounts::MasterEdition, MasterEditionAccount},
+    metadata::{self, mpl_token_metadata::accounts::MasterEdition, MasterEditionAccount},
     token::{self, Token},
 };
 use std::ops::Deref;
@@ -8,30 +8,45 @@ use std::ops::Deref;
 use crate::{
     constants::CLAIM_MARKER,
     errors::*,
+    mpl_token_metadata::EditionAccount,
     state::{MerchProduct, PaymentConfig},
 };
 
 #[derive(Accounts)]
-#[instruction(token: Pubkey)]
 pub struct BuyProduct<'info> {
     pub buyer: Signer<'info>,
 
     #[account(mut)]
     pub product: Box<Account<'info, MerchProduct>>,
 
+    #[account(
+        seeds = [
+            MasterEdition::PREFIX.0,
+            metadata::ID.as_ref(),
+            product
+                .linked_master_nft
+                .unwrap_or_default()
+                .as_ref(),
+            MasterEdition::PREFIX.0
+        ],
+        seeds::program = metadata::ID,
+        bump
+    )]
     pub master_edition_pda: Option<Box<Account<'info, MasterEditionAccount>>>,
+
+    pub edition_pda: Option<Box<Account<'info, EditionAccount>>>,
 
     /// CHECK: handled in buy logic
     #[account(
         mut,
         seeds = [
             CLAIM_MARKER.as_bytes(),
-            master_edition_pda
+            edition_pda
                 .as_ref()
-                .map(|master_edition| master_edition.key())
+                .map(|edition_pda| edition_pda.key())
                 .unwrap_or_default()
                 .as_ref()
-            ],
+        ],
         bump
     )]
     pub claim_marker: Option<UncheckedAccount<'info>>,
@@ -52,6 +67,7 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
         ref buyer,
         ref mut product,
         ref master_edition_pda,
+        ref edition_pda,
         ref mut claim_marker,
         system_program: ref system_program_account,
         ref token_program,
@@ -66,12 +82,12 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
             .as_ref()
             .ok_or(MissingMasterEdition)?
             .key();
-        let (linked_master_edition_pda, _) = MasterEdition::find_pda(linked_master_nft);
-        if linked_master_edition_pda != master_edition_key {
+        let edition_parent = edition_pda.as_ref().ok_or(MissingEdition)?.parent;
+        if master_edition_key != edition_parent {
             msg!(
-                "master edition pda mismatch: expected {}, got {}",
-                linked_master_edition_pda,
-                master_edition_key
+                "parent master edition mismatch: expected {}, got {}",
+                master_edition_key,
+                edition_parent
             );
             return Err(AccountMismatch.into());
         }
