@@ -1,4 +1,4 @@
-use anchor_lang::{Discriminator, prelude::*};
+use anchor_lang::{prelude::*, Discriminator};
 use anchor_spl::metadata::{
     self,
     mpl_token_metadata::{accounts::Edition, types::Key},

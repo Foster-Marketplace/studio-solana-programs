@@ -63,7 +63,7 @@ pub struct BuyProduct<'info> {
     // remaining accounts:
     // in order of product.payments,
     // for sol payments: recipient
-    // for token payments: from ata, to ata
+    // for token payments: from ata, to ata, [referrer ata, if there is a referrer]
 }
 
 pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) -> Result<()> {
@@ -147,12 +147,20 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
         recipient,
     } in &product.payments
     {
+        let referrer_amount =
+            (*amount * (product.affiliate_commission_bps as u64)) / BASIS_POINTS_DENOMINATOR;
+
         msg!("");
         // sol transfer
         if *mint == Pubkey::default() {
             let to = next_account_info(payment_atas)?.clone();
             msg!("processing sol payment: {}", tag);
-            msg!("from {} to {} for {} sol", buyer.key(), to.key(), amount,);
+            msg!(
+                "from {} to {} for {} lamports",
+                buyer.key(),
+                to.key(),
+                amount,
+            );
             if *recipient != to.key() {
                 msg!(
                     "invalid recipient: expected {}, got {}",
@@ -172,6 +180,21 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
                 ),
                 *amount,
             )?;
+
+            // process referrer payments
+            if let Some(referrer) = referrer {
+                msg!("referral payment: {} lamports", referrer_amount);
+                system_program::transfer(
+                    CpiContext::new(
+                        system_program_account.to_account_info(),
+                        system_program::Transfer {
+                            from: buyer.to_account_info(),
+                            to: referrer.to_account_info(),
+                        },
+                    ),
+                    referrer_amount,
+                )?;
+            }
         }
         // token payment
         else {
@@ -190,13 +213,34 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
                 CpiContext::new(
                     token_program.to_account_info(),
                     token::Transfer {
-                        from,
+                        from: from.clone(),
                         to,
                         authority: buyer.to_account_info(),
                     },
                 ),
                 *amount,
             )?;
+
+            // process referrer payments
+            if referrer.is_some() {
+                let referrer_ata = next_account_info(payment_atas)?.clone();
+                msg!(
+                    "referral payment: {} tokens to {}",
+                    referrer_amount,
+                    referrer_ata.key()
+                );
+                token::transfer(
+                    CpiContext::new(
+                        token_program.to_account_info(),
+                        token::Transfer {
+                            from,
+                            to: referrer_ata,
+                            authority: buyer.to_account_info(),
+                        },
+                    ),
+                    referrer_amount,
+                )?;
+            }
         }
     }
 
