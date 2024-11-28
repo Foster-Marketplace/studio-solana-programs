@@ -1,166 +1,187 @@
 import * as anchor from "@coral-xyz/anchor";
-const {
-  Program,
-  web3: { Keypair, PublicKey, LAMPORTS_PER_SOL },
-} = anchor;
+import { AnchorError } from "@coral-xyz/anchor";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
-  createInitializeMint2Instruction,
   getAssociatedTokenAddressSync,
-  MINT_SIZE,
-  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import * as assert from "assert";
 
-import { FosterStudio } from "../target/types/foster_studio";
-import { sol } from "./utils";
+import { Keypair, LAMPORTS_PER_SOL } from "./web3";
+import { admin, user, DEFAULT_PRODUCT_CONFIG, mint } from "./constants";
+import setupProgram from "./setup";
+import { buyProduct, buyProductBuilder, createProduct, studio } from "./lib";
+import {
+  deepStrictEqual,
+  getBalanceDelta,
+  getTokenBalanceDelta,
+  invertPromise,
+  sleep,
+  unixTimestamp,
+} from "./utils";
 
 describe("foster-studio", () => {
   const provider = anchor.AnchorProvider.env();
   const connection = provider.connection;
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.FosterStudio as Program<FosterStudio>;
+  before(() => setupProgram(connection));
 
-  const mint = Keypair.generate();
-  const productId = Keypair.generate();
-
-  const admin = Keypair.generate();
-  const user = Keypair.generate();
-
-  // create product
-  // test start time
-  // test end time
-  // buy product
   // link master edition
   // claim product
-  // delete product
-
-  before(async () => {
-    // fund keypairs
-    await Promise.all([
-      connection.requestAirdrop(admin.publicKey, 5 * LAMPORTS_PER_SOL),
-      connection.requestAirdrop(user.publicKey, 5 * LAMPORTS_PER_SOL),
-    ]);
-
-    // create mint
-    const ataAddress = getAssociatedTokenAddressSync(
-      mint.publicKey,
-      user.publicKey,
-    );
-    const tokenCreationTx = new Transaction().add(
-      SystemProgram.createAccount({
-        fromPubkey: user.publicKey,
-        newAccountPubkey: mint.publicKey,
-        space: MINT_SIZE,
-        lamports: await connection.getMinimumBalanceForRentExemption(MINT_SIZE),
-        programId: TOKEN_PROGRAM_ID,
-      }),
-      createInitializeMint2Instruction(
-        mint.publicKey,
-        6,
-        user.publicKey,
-        user.publicKey,
-      ),
-      createAssociatedTokenAccountIdempotentInstruction(
-        user.publicKey,
-        ataAddress,
-        user.publicKey,
-        mint.publicKey,
-      ),
-      createMintToInstruction(
-        mint.publicKey,
-        ataAddress,
-        user.publicKey,
-        1000 * 1_000_000,
-      ),
-
-      // create ata for admin
-      createAssociatedTokenAccountIdempotentInstruction(
-        user.publicKey,
-        getAssociatedTokenAddressSync(mint.publicKey, admin.publicKey),
-        admin.publicKey,
-        mint.publicKey,
-      ),
-    );
-    await sendAndConfirmTransaction(connection, tokenCreationTx, [user, mint]);
-  });
 
   it("create product", async () => {
-    const productConfig = {
-      authority: admin.publicKey,
-
-      name: "Test Product",
-      uri: "https://example.com",
-
-      category: "category",
-      max_supply: { none: {} },
-
-      sale_start_at: null,
-      sale_end_at: null,
-
-      linked_master_nft: null,
-      claims_per_edition: null,
-
-      payments: [
-        {
-          tag: "sol amount",
-          mint: new PublicKey(0),
-          // 0.1 sol
-          amount: sol(0.1),
-          recipient: admin.publicKey,
-        },
-        {
-          tag: "token amount",
-          mint: mint.publicKey,
-          // 100 tokens
-          amount: 100 * 1_000_000,
-          recipient: getAssociatedTokenAddressSync(
-            mint.publicKey,
-            admin.publicKey,
-          ),
-        },
-      ],
-      affiliate_commission_bps: null,
-    };
-
-    const productCreationTx = await program.methods
-      .configure(product)
-      .accounts({
-        payer: admin.publicKey,
-        product: productId.publicKey,
-      })
-      .signers([admin, productId])
-      .rpc();
-    console.log(`product created: ${productCreationTx}`);
-
-    const product = await program.account.merchProduct.fetch(
-      productId.publicKey,
-    );
-
-    assert.deepStrictEquals(product, { ...productConfig });
+    const { productId } = await createProduct();
+    const product = await studio.account.merchProduct.fetch(productId);
+    deepStrictEqual(product, {
+      ...DEFAULT_PRODUCT_CONFIG,
+      id: productId,
+      claimsPerEdition: 0,
+      currentSupply: "0",
+    });
   });
 
   it("delete product", async () => {
-    const adminPreBalance = await connection.getAccountBalance(admin.publicKey);
-    const productCreationTx = await program.methods
-      .configure(product)
+    const { productId } = await createProduct();
+    const productDeletionSignature = await studio.methods
+      .deleteProduct()
       .accounts({
         authority: admin.publicKey,
-        product: productId.publicKey,
+        product: productId,
       })
       .signers([admin])
       .rpc();
-    console.log(`product created: ${productCreationTx}`);
+    console.log(`product deleted: ${productDeletionSignature}`);
+    await sleep(1000);
 
-    const productAccount = await connection.getAccountBalance(
-      productId.publicKey,
-    );
-    assert.equals(productAccount, null);
+    const productAccount = await connection.getAccountInfo(productId);
+    assert.equal(productAccount, null);
 
-    const adminPostBalance = await connection.getAccountBalance(
-      admin.publicKey,
+    const productDeletionTx = await connection.getParsedTransaction(
+      productDeletionSignature,
+      "confirmed"
     );
-    assert.greaterThan(adminPostBalance, adminPreBalance);
+    assert.equal(
+      getBalanceDelta(productDeletionTx, admin.publicKey),
+      3111120,
+      "authority was refunded rent"
+    );
+  });
+
+  it("start time is verified", async () => {
+    const { productId } = await createProduct({
+      overrides: {
+        saleStartAt: unixTimestamp(10),
+      },
+    });
+
+    const buyError = await invertPromise<AnchorError>(
+      buyProduct({
+        productId,
+        buyer: user,
+      })
+    );
+
+    deepStrictEqual(buyError.error, {
+      errorCode: { code: "SaleNotStarted", number: 6002 },
+      errorMessage: "Sale not started",
+      comparedValues: undefined,
+      origin: undefined,
+    });
+  });
+
+  it("end time is verified", async () => {
+    const { productId } = await createProduct({
+      overrides: {
+        saleEndAt: unixTimestamp(-10),
+      },
+    });
+
+    const buyError = await invertPromise<AnchorError>(
+      buyProduct({
+        productId,
+        buyer: user,
+      })
+    );
+
+    deepStrictEqual(buyError.error, {
+      errorCode: { code: "SaleEnded", number: 6003 },
+      errorMessage: "Sale ended",
+      comparedValues: undefined,
+      origin: undefined,
+    });
+  });
+
+  it("buy product", async () => {
+    const { productId } = await createProduct();
+
+    const buySignature = await buyProduct({
+      productId,
+      buyer: user,
+    });
+    await sleep(2000);
+
+    const buyTx = await connection.getParsedTransaction(
+      buySignature,
+      "confirmed"
+    );
+
+    deepStrictEqual(
+      [getBalanceDelta(buyTx, admin.publicKey)],
+      [0.1 * LAMPORTS_PER_SOL],
+      "sol payments processed"
+    );
+    deepStrictEqual(
+      [
+        getTokenBalanceDelta(buyTx, mint, user.publicKey),
+        getTokenBalanceDelta(buyTx, mint, admin.publicKey),
+      ],
+      [-100n * 1_000_000n, 100n * 1_000_000n],
+      "token payments processed"
+    );
+  });
+
+  it("buy product with referrer", async () => {
+    const referrer = Keypair.generate();
+    const { productId } = await createProduct();
+
+    const buyBuilder = await buyProductBuilder({
+      productId,
+      buyer: user,
+      referrer: referrer.publicKey,
+    });
+    const buySignature = await buyBuilder
+      .preInstructions([
+        createAssociatedTokenAccountIdempotentInstruction(
+          user.publicKey,
+          getAssociatedTokenAddressSync(mint, referrer.publicKey),
+          referrer.publicKey,
+          mint
+        ),
+      ])
+      .rpc();
+    await sleep(2000);
+
+    const buyTx = await connection.getParsedTransaction(
+      buySignature,
+      "confirmed"
+    );
+
+    deepStrictEqual(
+      [
+        getBalanceDelta(buyTx, admin.publicKey),
+        getBalanceDelta(buyTx, referrer.publicKey),
+      ],
+      [0.1 * LAMPORTS_PER_SOL, 0.001 * LAMPORTS_PER_SOL],
+      "sol payments processed"
+    );
+    deepStrictEqual(
+      [
+        getTokenBalanceDelta(buyTx, mint, user.publicKey),
+        getTokenBalanceDelta(buyTx, mint, admin.publicKey),
+        getTokenBalanceDelta(buyTx, mint, referrer.publicKey),
+      ],
+      [-101n * 1_000_000n, 100n * 1_000_000n, 1n * 1_000_000n],
+      "token payments processed"
+    );
   });
 });
