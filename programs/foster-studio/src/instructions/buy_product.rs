@@ -6,7 +6,7 @@ use anchor_spl::{
 use std::ops::Deref;
 
 use crate::{
-    constants::CLAIM_MARKER,
+    constants::{BASIS_POINTS_DENOMINATOR, CLAIM_MARKER},
     errors::*,
     mpl_token_metadata::EditionAccount,
     state::{MerchProduct, PaymentConfig},
@@ -52,6 +52,9 @@ pub struct BuyProduct<'info> {
     )]
     pub claim_marker: Option<UncheckedAccount<'info>>,
 
+    #[account(mut)]
+    pub referrer: Option<AccountInfo<'info>>,
+
     #[account(address = system_program::ID)]
     pub system_program: Program<'info, System>,
 
@@ -70,6 +73,7 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
         ref master_edition_pda,
         ref edition_pda,
         ref mut claim_marker,
+        ref referrer,
         system_program: ref system_program_account,
         ref token_program,
     } = ctx.accounts;
@@ -147,14 +151,8 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
         // sol transfer
         if *mint == Pubkey::default() {
             let to = next_account_info(payment_atas)?.clone();
-            msg!(
-                "processing sol payment: {}\n\
-                from {} to {} for {} sol",
-                tag,
-                buyer.key(),
-                to.key(),
-                amount,
-            );
+            msg!("processing sol payment: {}", tag);
+            msg!("from {} to {} for {} sol", buyer.key(), to.key(), amount,);
             if *recipient != to.key() {
                 msg!(
                     "invalid recipient: expected {}, got {}",
@@ -179,10 +177,9 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
         else {
             let from = next_account_info(payment_atas)?.clone();
             let to = next_account_info(payment_atas)?.clone();
+            msg!("processing token payment: {}", tag);
             msg!(
-                "processing token payment: {}\n\
-                from {} to {} for {} {}",
-                tag,
+                "from {} to {} for {} {}",
                 from.key(),
                 to.key(),
                 amount,
