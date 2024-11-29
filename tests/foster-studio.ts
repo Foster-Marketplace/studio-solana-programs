@@ -184,4 +184,53 @@ describe("foster-studio", () => {
       "token payments processed"
     );
   });
+
+  it("buy product with max supply", async () => {
+    const { productId } = await createProduct({
+      overrides: {
+        maxSupply: { some: [new anchor.BN(1)] },
+      },
+    });
+
+    const buySignature = await buyProduct({
+      productId,
+      buyer: user,
+    });
+    await sleep(2000);
+
+    // less than max supply works
+    const buyTx = await connection.getParsedTransaction(
+      buySignature,
+      "confirmed"
+    );
+    assert.equal(buyTx.meta.err, null);
+
+    const product = await studio.account.merchProduct.fetch(productId);
+    deepStrictEqual(product, {
+      ...DEFAULT_PRODUCT_CONFIG,
+      id: productId,
+      currentSupply: "1",
+      maxSupply: {
+        some: {
+          "0": "1",
+        },
+      },
+      claimsPerEdition: 0,
+    });
+
+    // attempting to exceed max supply fails
+    const buyError = await invertPromise<AnchorError>(
+      buyProduct({
+        productId,
+        buyer: user,
+      })
+    );
+
+    deepStrictEqual(buyError.error, {
+      errorCode: { code: "NoMoreSupply", number: 6004 },
+      errorMessage: "No more supply",
+      comparedValues: undefined,
+      origin: undefined,
+    });
+  });
 });
