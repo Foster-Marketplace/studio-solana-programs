@@ -4,7 +4,7 @@ import { IdlAccounts, IdlTypes, Program } from "@coral-xyz/anchor";
 import { AccountMeta, Keypair, PublicKey } from "./web3";
 import { FosterStudio } from "../target/types/foster_studio";
 import { admin, DEFAULT_PRODUCT_CONFIG } from "./constants";
-import { findMasterEditionPda } from "./mpl-token-metadata";
+import { findMasterEditionPda } from "./mplTokenMetadata";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 
 export const studio = anchor.workspace.FosterStudio as Program<FosterStudio>;
