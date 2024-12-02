@@ -35,19 +35,19 @@ impl MerchProduct {
             return Err(MissingMasterEdition.into());
         }
 
-        let (current_supply, max_supply) = match self.max_supply {
+        let max_supply = match self.max_supply {
             MaxSupply::None => return Ok(()),
-            MaxSupply::Some(count) => (self.current_supply, count),
+            MaxSupply::Some(count) => count,
             MaxSupply::FollowMasterEdition => {
                 let master_edition = master_edition.ok_or(MissingMasterEdition)?;
                 let Some(max_supply) = master_edition.max_supply else {
                     return Ok(());
                 };
-                (master_edition.supply, max_supply)
+                max_supply
             }
         };
 
-        if current_supply < max_supply {
+        if self.current_supply < max_supply {
             Ok(())
         } else {
             msg!("no more supply: max supply = {}", max_supply);
@@ -79,7 +79,7 @@ impl MerchProduct {
 
     pub fn process_user_claim(&self, claim_count: u32) -> Result<u32> {
         let new_claim_count = claim_count + 1;
-        if self.claims_per_edition > 0 && self.claims_per_edition > new_claim_count {
+        if self.claims_per_edition > 0 && new_claim_count > self.claims_per_edition {
             msg!(
                 "claim amount reached for mint: max {}",
                 self.claims_per_edition

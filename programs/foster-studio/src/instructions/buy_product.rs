@@ -28,7 +28,7 @@ pub struct BuyProduct<'info> {
                 .linked_master_nft
                 .unwrap_or_default()
                 .as_ref(),
-            MasterEdition::PREFIX.0
+            MasterEdition::PREFIX.1
         ],
         seeds::program = metadata::ID,
         bump
@@ -82,12 +82,13 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
     product.assert_is_live()?;
 
     // verify linked master edition
-    if let Some(linked_master_nft) = &product.linked_master_nft {
+    if product.linked_master_nft.is_some() {
         let master_edition_key = master_edition_pda
             .as_ref()
             .ok_or(MissingMasterEdition)?
             .key();
-        let edition_parent = edition_pda.as_ref().ok_or(MissingEdition)?.parent;
+        let edition_pda = edition_pda.as_ref().ok_or(MissingEdition)?;
+        let edition_parent = edition_pda.parent;
         if master_edition_key != edition_parent {
             msg!(
                 "parent master edition mismatch: expected {}, got {}",
@@ -113,7 +114,7 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
                 )
                 .with_signer(&[&[
                     CLAIM_MARKER.as_bytes(),
-                    linked_master_nft.as_ref(),
+                    edition_pda.key().as_ref(),
                     &[ctx.bumps.claim_marker.unwrap_or_default()],
                 ]]),
                 Rent::get()?.minimum_balance(claim_count_len),
@@ -121,7 +122,7 @@ pub fn buy_product<'info>(ctx: Context<'_, '_, '_, 'info, BuyProduct<'info>>) ->
                 &crate::ID,
             )?;
         } else {
-            u32::deserialize(&mut &(**claim_marker.try_borrow_data()?))?;
+            claim_count = u32::deserialize(&mut &(**claim_marker.try_borrow_data()?))?;
         }
 
         claim_count = product.process_user_claim(claim_count)?;
